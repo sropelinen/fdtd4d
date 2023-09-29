@@ -24,6 +24,7 @@ class FDTD:
             self.E[t + 1] = self.E[t] + self._cn * self.dE(self.H[t])
             for BC in self.BCs:
                 self.E[t + 1] = BC.post_update_E(self.E[t + 1])
+            for BC in self.BCs:
                 BC.pre_update_H(self.E[t + 1])
             self.H[t + 1] = self.H[t] + self._cn * self.dH(self.E[t + 1])
             for BC in self.BCs:
