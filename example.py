@@ -4,22 +4,15 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 from fdtd4d import FDTD
-from boundaries import ABC
 
 
-# Setup
-fdtd = FDTD((50, 50, 1, 50))
-fdtd.E_init[25, 25, 0, 25, 3] = 1
-fdtd.add_BC(ABC(10, 10, 0, 10))
+fdtd = FDTD((70, 70, 1, 70))
+fdtd.E_init[35, 35, 0, 35, 2] = 1
+E, H = fdtd.run(80)
 
-# Run
-E, H = fdtd.run(70)
-
-# Plot
-energy = np.sum(np.sum(E**2 + H**2, -1)[:, 10:-10, 10:-10, :, 10:-10]**.5, -1)
-
-plot = plt.imshow(energy[0, ...],
-                  interpolation="bicubic",
+energy = np.sum(E**2 + H**2, -1)**.5
+energy = np.sum(energy, 0)[20:-20, 20:-20, :, 20:-20]
+plot = plt.imshow(energy[..., 0, 0],
                   cmap="hot",
                   vmin=0,
                   vmax=np.max(energy))
@@ -28,6 +21,6 @@ plt.gca().set_axis_off()
 plt.tight_layout()
 
 def animate(i):
-    plot.set_array(energy[i, ...])
-anim = FuncAnimation(plt.gcf(), animate, 70, interval=100)
+    plot.set_array(energy[..., 0, i])
+anim = FuncAnimation(plt.gcf(), animate, 30, interval=100)
 plt.show()
