@@ -6,13 +6,16 @@ class FDTD:
 
     def __init__(self, shape, boundary):
 
+        # Floating point accuracy
+        self.ftype = np.float32
+
         # Courant number
         self.cn = 0.5
         # Absorbing boundary thickness
         self.bt = 30
 
         # Shape of the measured fields
-        self.shape = np.insert(np.array(shape), 4, 4)
+        self.shape = np.insert(np.array(shape, dtype=np.int16), 4, 4)
         # Shape of the fdtd grid
         self.bshape = np.copy(self.shape)
         self.boundary = np.array(boundary, dtype=bool)
@@ -25,83 +28,73 @@ class FDTD:
                 a[i] = slice(None)
         self.slice = tuple(a)
 
-        # Initial conditions for the fields
-        self.E_init = np.zeros(self.shape)
-        self.H_init = np.zeros(self.shape)
+        # Initial conditions
+        self.E_init = np.zeros(self.shape, dtype=self.ftype)
+        self.H_init = np.zeros(self.shape, dtype=self.ftype)
 
     def run(self, steps):
 
-        # "Electric" field
-        self.E = np.zeros(np.insert(self.bshape, 0, steps + 1))
-        # "Magnetic" field
-        self.H = np.zeros(np.insert(self.bshape, 0, steps + 1))
+        # "Electric" and "magnetic" fields
+        self.E = [np.zeros(self.bshape, dtype=self.ftype)]
+        self.H = [np.zeros(self.bshape, dtype=self.ftype)]
+        # [var] allows passing var by reference
 
-        # Insert initial conditions
-        self.E[(0,) + self.slice] += self.E_init
-        self.H[(0,) + self.slice] += self.H_init
+        # Apply initial conditions
+        self.E[0][self.slice] = self.E_init
+        self.H[0][self.slice] = self.H_init
 
         # Parameters for the absorbing boundary
         ds, loss = self._setup_boundary()
 
         # Run
-        for t in range(steps):
-            self.E[t + 1] = loss * (self.E[t]
-                                    + self.cn * ds * self.dE(self.H[t]))
-            self.H[t + 1] = loss * (self.H[t]
-                                    + self.cn * ds * self.dH(self.E[t + 1]))
+        for s in range(steps):
+            self.next_E(self.E[0], self.cn * ds * self.H[0])
+            self.E[0] *= loss
+            self.next_H(self.H[0], self.cn * ds * self.E[0])
+            self.H[0] *= loss
 
-        # Return the measured area of the fields
-        return self.E[(slice(None),) + self.slice], \
-            self.H[(slice(None),) + self.slice]
+        return self.E[0][self.slice], self.H[0][self.slice]
 
-    def dE(self, H):
+    def next_E(self, E, H):
         # Ds E = curl H - Dt H - grad Ht
         # Ds Et = div H - Dt Ht
-        d = np.zeros(H.shape)
-        d[1:, :, :, :, 0] -= H[1:, :, :, :, 3] - H[:-1, :, :, :, 3]
-        d[:, 1:, :, :, 0] += H[:, 1:, :, :, 2] - H[:, :-1, :, :, 2]
-        d[:, :, 1:, :, 0] -= H[:, :, 1:, :, 1] - H[:, :, :-1, :, 1]
-        d[:, :, :, 1:, 0] -= H[:, :, :, 1:, 0] - H[:, :, :, :-1, 0]
-        d[1:, :, :, :, 1] -= H[1:, :, :, :, 2] - H[:-1, :, :, :, 2]
-        d[:, 1:, :, :, 1] -= H[:, 1:, :, :, 3] - H[:, :-1, :, :, 3]
-        d[:, :, 1:, :, 1] += H[:, :, 1:, :, 0] - H[:, :, :-1, :, 0]
-        d[:, :, :, 1:, 1] -= H[:, :, :, 1:, 1] - H[:, :, :, :-1, 1]
-        d[1:, :, :, :, 2] += H[1:, :, :, :, 1] - H[:-1, :, :, :, 1]
-        d[:, 1:, :, :, 2] -= H[:, 1:, :, :, 0] - H[:, :-1, :, :, 0]
-        d[:, :, 1:, :, 2] -= H[:, :, 1:, :, 3] - H[:, :, :-1, :, 3]
-        d[:, :, :, 1:, 2] -= H[:, :, :, 1:, 2] - H[:, :, :, :-1, 2]
-        d[1:, :, :, :, 3] += H[1:, :, :, :, 0] - H[:-1, :, :, :, 0]
-        d[:, 1:, :, :, 3] += H[:, 1:, :, :, 1] - H[:, :-1, :, :, 1]
-        d[:, :, 1:, :, 3] += H[:, :, 1:, :, 2] - H[:, :, :-1, :, 2]
-        d[:, :, :, 1:, 3] -= H[:, :, :, 1:, 3] - H[:, :, :, :-1, 3]
-        return d
+        E[1:, :, :, :, 0] -= H[1:, :, :, :, 3] - H[:-1, :, :, :, 3]
+        E[:, 1:, :, :, 0] += H[:, 1:, :, :, 2] - H[:, :-1, :, :, 2]
+        E[:, :, 1:, :, 0] -= H[:, :, 1:, :, 1] - H[:, :, :-1, :, 1]
+        E[1:, :, :, :, 1] -= H[1:, :, :, :, 2] - H[:-1, :, :, :, 2]
+        E[:, 1:, :, :, 1] -= H[:, 1:, :, :, 3] - H[:, :-1, :, :, 3]
+        E[:, :, 1:, :, 1] += H[:, :, 1:, :, 0] - H[:, :, :-1, :, 0]
+        E[1:, :, :, :, 2] += H[1:, :, :, :, 1] - H[:-1, :, :, :, 1]
+        E[:, 1:, :, :, 2] -= H[:, 1:, :, :, 0] - H[:, :-1, :, :, 0]
+        E[:, :, 1:, :, 2] -= H[:, :, 1:, :, 3] - H[:, :, :-1, :, 3]
+        E[1:, :, :, :, 3] += H[1:, :, :, :, 0] - H[:-1, :, :, :, 0]
+        E[:, 1:, :, :, 3] += H[:, 1:, :, :, 1] - H[:, :-1, :, :, 1]
+        E[:, :, 1:, :, 3] += H[:, :, 1:, :, 2] - H[:, :, :-1, :, 2]
+        E[:, :, :, 1:] -= H[:, :, :, 1:] - H[:, :, :, :-1]
 
-    def dH(self, E):
+    def next_H(self, H, E):
         # Ds H = -curl E - Dt E + grad Et
         # Ds Ht = -div E - Dt Et
-        d = np.zeros(E.shape)
-        d[:-1, :, :, :, 0] += E[1:, :, :, :, 3] - E[:-1, :, :, :, 3]
-        d[:, :-1, :, :, 0] -= E[:, 1:, :, :, 2] - E[:, :-1, :, :, 2]
-        d[:, :, :-1, :, 0] += E[:, :, 1:, :, 1] - E[:, :, :-1, :, 1]
-        d[:, :, :, :-1, 0] -= E[:, :, :, 1:, 0] - E[:, :, :, :-1, 0]
-        d[:-1, :, :, :, 1] += E[1:, :, :, :, 2] - E[:-1, :, :, :, 2]
-        d[:, :-1, :, :, 1] += E[:, 1:, :, :, 3] - E[:, :-1, :, :, 3]
-        d[:, :, :-1, :, 1] -= E[:, :, 1:, :, 0] - E[:, :, :-1, :, 0]
-        d[:, :, :, :-1, 1] -= E[:, :, :, 1:, 1] - E[:, :, :, :-1, 1]
-        d[:-1, :, :, :, 2] -= E[1:, :, :, :, 1] - E[:-1, :, :, :, 1]
-        d[:, :-1, :, :, 2] += E[:, 1:, :, :, 0] - E[:, :-1, :, :, 0]
-        d[:, :, :-1, :, 2] += E[:, :, 1:, :, 3] - E[:, :, :-1, :, 3]
-        d[:, :, :, :-1, 2] -= E[:, :, :, 1:, 2] - E[:, :, :, :-1, 2]
-        d[:-1, :, :, :, 3] -= E[1:, :, :, :, 0] - E[:-1, :, :, :, 0]
-        d[:, :-1, :, :, 3] -= E[:, 1:, :, :, 1] - E[:, :-1, :, :, 1]
-        d[:, :, :-1, :, 3] -= E[:, :, 1:, :, 2] - E[:, :, :-1, :, 2]
-        d[:, :, :, :-1, 3] -= E[:, :, :, 1:, 3] - E[:, :, :, :-1, 3]
-        return d
+        H[:-1, :, :, :, 0] += E[1:, :, :, :, 3] - E[:-1, :, :, :, 3]
+        H[:, :-1, :, :, 0] -= E[:, 1:, :, :, 2] - E[:, :-1, :, :, 2]
+        H[:, :, :-1, :, 0] += E[:, :, 1:, :, 1] - E[:, :, :-1, :, 1]
+        H[:-1, :, :, :, 1] += E[1:, :, :, :, 2] - E[:-1, :, :, :, 2]
+        H[:, :-1, :, :, 1] += E[:, 1:, :, :, 3] - E[:, :-1, :, :, 3]
+        H[:, :, :-1, :, 1] -= E[:, :, 1:, :, 0] - E[:, :, :-1, :, 0]
+        H[:-1, :, :, :, 2] -= E[1:, :, :, :, 1] - E[:-1, :, :, :, 1]
+        H[:, :-1, :, :, 2] += E[:, 1:, :, :, 0] - E[:, :-1, :, :, 0]
+        H[:, :, :-1, :, 2] += E[:, :, 1:, :, 3] - E[:, :, :-1, :, 3]
+        H[:-1, :, :, :, 3] -= E[1:, :, :, :, 0] - E[:-1, :, :, :, 0]
+        H[:, :-1, :, :, 3] -= E[:, 1:, :, :, 1] - E[:, :-1, :, :, 1]
+        H[:, :, :-1, :, 3] -= E[:, :, 1:, :, 2] - E[:, :, :-1, :, 2]
+        H[:, :, :, :-1] -= E[:, :, :, 1:] - E[:, :, :, :-1]
+        return H
 
     def _setup_boundary(self):
 
         # Measured area is 1, boundaries go linearly to 0
-        linear = np.pad(np.ones(self.shape[:-1][self.boundary]),
+        linear = np.pad(np.ones(self.shape[:-1][self.boundary],
+                                dtype=self.ftype),
                         self.bt, "linear_ramp")
         for i in range(4):
             if not self.boundary[i]:
