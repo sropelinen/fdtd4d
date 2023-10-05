@@ -10,7 +10,7 @@ class FDTD:
         self.ftype = np.float32
 
         # Courant number
-        self.cn = 0.5
+        self.cn = 0.45
         # Absorbing boundary thickness
         self.bt = 30
 
@@ -37,7 +37,6 @@ class FDTD:
         # "Electric" and "magnetic" fields
         self.E = [np.zeros(self.bshape, dtype=self.ftype)]
         self.H = [np.zeros(self.bshape, dtype=self.ftype)]
-        # [var] allows passing var by reference
 
         # Apply initial conditions
         self.E[0][self.slice] = self.E_init
@@ -45,15 +44,25 @@ class FDTD:
 
         # Parameters for the absorbing boundary
         ds, loss = self._setup_boundary()
+        ds *= self.cn
+
+        # Results
+        E_results = np.empty(np.insert(self.shape[None], 0, steps + 1), 
+                             dtype=self.ftype)
+        H_results = np.copy(E_results)
+        E_results[0] = self.E[0][self.slice]
+        H_results[0] = self.H[0][self.slice]
 
         # Run
         for s in range(steps):
-            self.next_E(self.E[0], self.cn * ds * self.H[0])
+            self.next_E(self.E[0], ds * self.H[0])
             self.E[0] *= loss
-            self.next_H(self.H[0], self.cn * ds * self.E[0])
+            self.next_H(self.H[0], ds * self.E[0])
             self.H[0] *= loss
+            E_results[s + 1] = self.E[0][self.slice]
+            H_results[s + 1] = self.H[0][self.slice]
 
-        return self.E[0][self.slice], self.H[0][self.slice]
+        return E_results, H_results
 
     def next_E(self, E, H):
         # Ds E = curl H - Dt H - grad Ht
